@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "POC 2205031110"
-include ':app'
+include ':POC 2205031110'
