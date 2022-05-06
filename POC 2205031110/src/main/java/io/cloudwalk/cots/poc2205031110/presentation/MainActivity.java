@@ -1,9 +1,12 @@
-package io.cloudwalk.cots.poc2205031110;
+package io.cloudwalk.cots.poc2205031110.presentation;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.os.Bundle;
 import android.util.Log;
+
+import io.cloudwalk.cots.poc2205031110.Kernel;
+import io.cloudwalk.cots.poc2205031110.R;
 
 public class MainActivity extends AppCompatActivity {
     private static final String
@@ -17,6 +20,6 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        DiscoverUtility.run();
+        Kernel.run(); // 2022-05-06: DEMO-only
     }
 }

@@ -2,10 +2,8 @@ package io.cloudwalk.cots.poc2205031110;
 
 import android.util.Log;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-
 import com.discover.mpos.sdk.card.connectors.ConnectorType;
+import com.discover.mpos.sdk.cardreader.CardReader;
 import com.discover.mpos.sdk.cardreader.config.CombinationConfiguration;
 import com.discover.mpos.sdk.cardreader.config.EntryPointConfigurationData;
 import com.discover.mpos.sdk.cardreader.config.ReaderConfiguration;
@@ -20,20 +18,12 @@ import com.discover.mpos.sdk.core.data.Amount;
 import com.discover.mpos.sdk.core.debug.logger.AndroidLogger;
 import com.discover.mpos.sdk.core.debug.logger.Message;
 import com.discover.mpos.sdk.core.debug.logger.MessageType;
-import com.discover.mpos.sdk.data.external.TerminalCAPublicKey;
-import com.discover.mpos.sdk.data.external.initiateapplicationprocessingconnect.ExtendedLoggingDataRequest;
-import com.discover.mpos.sdk.data.external.initiateapplicationprocessingconnect.ExtendedLoggingDataResponse;
-import com.discover.mpos.sdk.data.external.readdatarecord.DataStorageRequest;
-import com.discover.mpos.sdk.data.external.readdatarecord.DataStorageResponse;
 import com.discover.mpos.sdk.initialization.CustomInitializer;
 import com.discover.mpos.sdk.module.CardReaderModule;
 import com.discover.mpos.sdk.security.RandomNumberGenerator;
 import com.discover.mpos.sdk.transaction.Transaction;
 import com.discover.mpos.sdk.transaction.TransactionData;
-import com.discover.mpos.sdk.transaction.TransactionHandler;
 import com.discover.mpos.sdk.transaction.TransactionType;
-import com.discover.mpos.sdk.transaction.outcome.TransactionOutcome;
-import com.discover.mpos.sdk.transaction.outcome.UiRequest;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -42,13 +32,16 @@ import java.util.Calendar;
 import java.util.Currency;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
-import kotlin.Unit;
-import kotlin.jvm.functions.Function1;
+import io.cloudwalk.cots.poc2205031110.utilities.CallbackUtility;
 
-public class DiscoverUtility {
-    private final static String
-            TAG = DiscoverUtility.class.getSimpleName();
+public class Kernel {
+    private static final String
+            TAG = Kernel.class.getSimpleName();
+
+    private static final AtomicReference<Transaction>
+            sTransaction = new AtomicReference<>(null);
 
     private static MPosConfiguration _getConfiguration(TransactionType SPE_TRNTYPE, String SPE_APPTYPE, Currency SPE_TRNCURR, Amount SPE_AMOUNT) {
         Log.d(TAG, "_getConfiguration");
@@ -115,11 +108,8 @@ public class DiscoverUtility {
                                     TAG_9F66,
                                     true
                             ),
-                            false,
-                            false,
-                            false,
-                            false,
-                            new ArrayList<>(0)
+                            false,  false,
+                            false,  false,  new ArrayList<>(0)
                     )
             );
         // } else {
@@ -138,11 +128,8 @@ public class DiscoverUtility {
                                     TAG_9F66,
                                     true
                             ),
-                            false,
-                            false,
-                            false,
-                            false,
-                            new ArrayList<>(0)
+                            false,  false,
+                            false,  false,  new ArrayList<>(0)
                     )
             );
         // }
@@ -174,44 +161,32 @@ public class DiscoverUtility {
         return new CustomInitializer(randomizer, null);
     }
 
-    private static TransactionHandler _getTransactionHandler() {
-        Log.d(TAG, "_getTransactionHandler");
+    private static TransactionData _getTransactionData(Amount SPE_AMOUNT, Currency SPE_TRNCURR, TransactionType SPE_TRNTYPE, Amount SPE_CASHBACK, Date SPE_TRNDATE) {
+        Log.d(TAG, "_getTransactionData");
 
-        return new TransactionHandler() {
-            @Override
-            public void onComplete(@NonNull Transaction transaction, @NonNull TransactionOutcome transactionOutcome) {
-                Log.d(TAG, "TransactionHandler::onComplete::transactionOutcome [" + transactionOutcome + "]");
-            }
-
-            @Override
-            public void onUIRequest(@NonNull Transaction transaction, @NonNull UiRequest uiRequest) {
-                Log.d(TAG, "TransactionHandler::onUIRequest::uiRequest [" + uiRequest + "]");
-            }
-
-            @Nullable
-            @Override
-            public TerminalCAPublicKey onCAPKeyRequest(@NonNull Transaction transaction, @NonNull String s, @NonNull String s1) {
-                Log.d(TAG, "TransactionHandler::onCAPKeyRequest");
-
-                return null;
-            }
-
-            @Override
-            public void onDataStorageProcessingRequest(@NonNull DataStorageRequest dataStorageRequest, @NonNull Function1<? super DataStorageResponse, Unit> function1) {
-                Log.d(TAG, "TransactionHandler::onDataStorageProcessingRequest");
-            }
-
-            @Override
-            public void onExtendedLoggingDataProcessingRequest(@NonNull ExtendedLoggingDataRequest extendedLoggingDataRequest, @NonNull Function1<? super ExtendedLoggingDataResponse, Unit> function1) {
-                Log.d(TAG, "TransactionHandler::onExtendedLoggingDataProcessingRequest");
-            }
-        };
+        return new TransactionData(SPE_AMOUNT, SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, ConnectorType.NFC, SPE_TRNDATE);
     }
 
-    private DiscoverUtility() {
-        Log.d(TAG, "DiscoverUtility");
+    private static CardReaderModule _getReaderModule(MPosConfiguration configuration) {
+        Log.d(TAG, "_getReaderModule");
+
+        return new CardReaderModule(configuration, Application.getInstance(), _getCustomInitializer());
+    }
+
+    private Kernel() {
+        Log.d(TAG, "Kernel");
 
         /* Nothing to do */
+    }
+
+    public static void interrupt() {
+        Log.d(TAG, "interrupt");
+
+        Transaction current = sTransaction.get();
+
+        if (current != null) {
+            current.cancel();
+        }
     }
 
     public static void run() {
@@ -234,17 +209,19 @@ public class DiscoverUtility {
 
         DiscoverMPos.Companion.getDebugger().register(logger);
 
-        MPosConfiguration   configuration   = _getConfiguration(SPE_TRNTYPE, SPE_APPTYPE, SPE_TRNCURR, SPE_AMOUNT);
-        CardReaderModule    cardReader      = new CardReaderModule(configuration, Application.getInstance(), _getCustomInitializer());
-        TransactionData     transaction     = new TransactionData(SPE_AMOUNT, SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, ConnectorType.NFC, SPE_TRNDATE);
+        MPosConfiguration   configuration   = _getConfiguration  (SPE_TRNTYPE, SPE_APPTYPE, SPE_TRNCURR, SPE_AMOUNT);
+        TransactionData     transaction     = _getTransactionData(SPE_AMOUNT,  SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, SPE_TRNDATE);
+        CardReaderModule    readerModule    = _getReaderModule   (configuration);
 
-        DiscoverMPos        mobilePOS       = new DiscoverMPos();
+        DiscoverMPos mobilePOS  = new DiscoverMPos();
 
         mobilePOS.clear();
-        mobilePOS.init(cardReader);
+        mobilePOS.init (readerModule);
 
         DiscoverMPos.Companion.getDebugger().setEnabled(true);
 
-        cardReader.getCardReader().startTransaction(transaction, _getTransactionHandler());
+        CardReader   cardReader = readerModule.getCardReader();
+
+        sTransaction.set(cardReader.startTransaction(transaction, CallbackUtility.getKernelCallback()));
     }
 }
