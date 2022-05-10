@@ -15,6 +15,8 @@ import com.discover.mpos.sdk.transaction.TransactionHandler;
 import com.discover.mpos.sdk.transaction.outcome.TransactionOutcome;
 import com.discover.mpos.sdk.transaction.outcome.UiRequest;
 
+import java.util.concurrent.atomic.AtomicReference;
+
 import io.cloudwalk.cots.poc2205031110.Kernel;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function1;
@@ -23,8 +25,11 @@ public class CallbackUtility {
     private static final String
             TAG = CallbackUtility.class.getSimpleName();
 
-    private static final TransactionHandler
-            sKernelCallback = _getTransactionHandler();
+    private static final AtomicReference<TransactionHandler>
+            sKernelCallback         = new AtomicReference<>(null);
+
+    private static final AtomicReference<TransactionOutcome>
+            sLastTransactionOutcome = new AtomicReference<>(null);
 
     private CallbackUtility() {
         Log.d(TAG, "CallbackUtility");
@@ -32,42 +37,39 @@ public class CallbackUtility {
         /* Nothing to do */
     }
 
-    private static TransactionHandler _getTransactionHandler() {
-        Log.d(TAG, "_getTransactionHandler");
+    public static TransactionHandler getKernelCallback() {
+        Log.d(TAG, "getKernelCallback");
 
-        return new TransactionHandler() {
+        TransactionHandler kernelCallback = sKernelCallback.get();
+
+        if (kernelCallback != null) {
+            return kernelCallback;
+        }
+
+        kernelCallback = new TransactionHandler() {
             @Override
             public void onComplete(@NonNull Transaction transaction, @NonNull TransactionOutcome transactionOutcome) {
                 Log.d(TAG, "onComplete::transactionOutcome [" + transactionOutcome + "]");
 
-                Kernel.interrupt();
+                sLastTransactionOutcome.set(transactionOutcome);
             }
 
             @Override
             public void onUIRequest(@NonNull Transaction transaction, @NonNull UiRequest uiRequest) {
                 Log.d(TAG, "onUIRequest::uiRequest [" + uiRequest + "]");
 
-                UiRequest.MessageIdentifier identifier = uiRequest.getMessageIdentifier();
+                UiRequest.MessageIdentifier message = uiRequest.getMessageIdentifier();
 
-                if (uiRequest.getStatus() != UiRequest.Status.PROCESSING_ERROR) {
-                    if (identifier != null) {
-                        switch (identifier) {
-                            case PROCESSING_ERROR:
-                            case INSERT_SWIPE_OR_TRY_ANOTHER_CARD:
-                            case NOT_AUTHORISED:
-                            case PLEASE_INSERT_CARD:
-                            case PLEASE_INSERT_OR_SWIPE_CARD:
-                            case PLEASE_PRESENT_ONE_CARD_ONLY:
-                                /* Nothing to do */
-                                break;
-
-                            default:
-                                return;
-                        }
-                    }
+                if (message != null
+                 && message == UiRequest.MessageIdentifier.PRESENT_CARD) {
+                    sLastTransactionOutcome.set(null);
                 }
 
-                Kernel.interrupt();
+                TransactionOutcome transactionOutcome = sLastTransactionOutcome.get();
+
+                if (transactionOutcome != null) {
+                    Kernel.finish();
+                }
             }
 
             @Nullable
@@ -88,11 +90,15 @@ public class CallbackUtility {
                 Log.d(TAG, "onExtendedLoggingDataProcessingRequest");
             }
         };
+
+        sKernelCallback.set(kernelCallback);
+
+        return kernelCallback;
     }
 
-    public static TransactionHandler getKernelCallback() {
-        Log.d(TAG, "getKernelCallback");
+    public static TransactionOutcome getLastTransactionOutcome() {
+        Log.d(TAG, "getLastTransactionOutcome");
 
-        return sKernelCallback;
+        return sLastTransactionOutcome.get();
     }
 }

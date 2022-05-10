@@ -20,6 +20,6 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        Kernel.run(); // 2022-05-06: DEMO-only
+        Kernel.create(); // 2022-05-06: DEMO-only
     }
 }

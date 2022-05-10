@@ -16,8 +16,6 @@ import com.discover.mpos.sdk.config.MPosConfiguration;
 import com.discover.mpos.sdk.core.DiscoverMPos;
 import com.discover.mpos.sdk.core.data.Amount;
 import com.discover.mpos.sdk.core.debug.logger.AndroidLogger;
-import com.discover.mpos.sdk.core.debug.logger.Message;
-import com.discover.mpos.sdk.core.debug.logger.MessageType;
 import com.discover.mpos.sdk.initialization.CustomInitializer;
 import com.discover.mpos.sdk.module.CardReaderModule;
 import com.discover.mpos.sdk.security.RandomNumberGenerator;
@@ -32,6 +30,8 @@ import java.util.Calendar;
 import java.util.Currency;
 import java.util.Date;
 import java.util.List;
+// import java.util.concurrent.Semaphore;
+// import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.cloudwalk.cots.poc2205031110.utilities.CallbackUtility;
@@ -40,11 +40,60 @@ public class Kernel {
     private static final String
             TAG = Kernel.class.getSimpleName();
 
+    private static final AtomicReference<MPosConfiguration>
+            sConfiguration      = new AtomicReference<>(null);
+
+    private static final AtomicReference<CustomInitializer>
+            sCustomInitializer  = new AtomicReference<>(null);
+
+    private static final AtomicReference<DiscoverMPos>
+            sMobilePOS          = new AtomicReference<>(null);
+
     private static final AtomicReference<Transaction>
-            sTransaction = new AtomicReference<>(null);
+            sTransaction        = new AtomicReference<>(null);
+
+    private static final AtomicReference<TransactionData>
+            sTransactionData    = new AtomicReference<>(null);
+
+    private static final AtomicReference<CardReaderModule>
+            sReaderModule       = new AtomicReference<>(null);
+
+    // private static final Semaphore
+    //         sSemaphore = new Semaphore(1, true);
+
+    private static void _finish() {
+        // Log.d(TAG, "_finish");
+
+        DiscoverMPos mobilePOS = sMobilePOS.get();
+
+        if (mobilePOS != null) {
+            mobilePOS.clear();
+        }
+
+        sConfiguration      .set(null);
+        sCustomInitializer  .set(null);
+        sMobilePOS          .set(null);
+        sTransaction        .set(null);
+        sTransactionData    .set(null);
+        sReaderModule       .set(null);
+
+        // try {
+        //     sSemaphore.tryAcquire(0, TimeUnit.MILLISECONDS);
+        // } catch (InterruptedException exception) {
+        //     Log.e(TAG, Log.getStackTraceString(exception));
+        // } finally {
+        //     sSemaphore.release();
+        // }
+    }
 
     private static MPosConfiguration _getConfiguration(TransactionType SPE_TRNTYPE, String SPE_APPTYPE, Currency SPE_TRNCURR, Amount SPE_AMOUNT) {
-        Log.d(TAG, "_getConfiguration");
+        // Log.d(TAG, "_getConfiguration");
+
+        MPosConfiguration configuration = sConfiguration.get();
+
+        if (configuration != null) {
+            return configuration;
+        }
 
         String          T1_APPVERx    = "0001";
         String          T1_TRMCNTRY   = "0076";
@@ -60,27 +109,27 @@ public class Kernel {
         String          T1_CTLSMODE   = "06"; // 2022-04-22: naturally differs from ABECS specification
 
         TerminalCapabilitiesQualifiers
-                        T1_TRMCAPAB   = new TerminalCapabilitiesQualifiers("20D0E8");
+                        T1_TRMCAPAB   = new TerminalCapabilitiesQualifiers("00D0E8");
 
-        /* 2022-04-22: 9F330320D0E8
+        /* 2022-04-22: 9F33 03 00D0E8
          *
          * EMV Book 4 page 116
          *
          * (T) 9F33 Terminal Capabilities
          * (L) 03
-         * (V) 20D0E8 // 00100000 11010000 11101000
+         * (V) 00D0E8   // ........ 00000000 11010000 11101000
          */
 
         TerminalTransactionQualifiers
-                        TAG_9F66      = new TerminalTransactionQualifiers("35200000");
+                        TAG_9F66      = new TerminalTransactionQualifiers("25000000");
 
-        /* 2022-04-25: 9F660435200000
+        /* 2022-04-25: 9F66 04 25000000
          *
          * EMV Book C-6 page 109
          *
          * (T) 9F66 Terminal Transaction Qualifier
          * (L) 04
-         * (V) 35200000 // 00110101 00100000 00000000 00000000
+         * (V) 25000000 // 00100101 00000000 00000000 00000000
          */
 
         TerminalConfiguration terminal = new TerminalConfiguration(
@@ -92,27 +141,7 @@ public class Kernel {
 
         List<CombinationConfiguration> candidateList = new ArrayList<>(0);
 
-        // if (SPE_APPTYPE.contains("CREDIT")) {
-            candidateList.add(
-                    new CombinationConfiguration(
-                            "A0000004942010",
-                            T1_CTLSMODE,
-                            new EntryPointConfigurationData(
-                                    true,
-                                    T1_CTLSZEROAM,
-                                    T1_CTLSZEROAM,
-                                    T1_CTLSTRNLIM,
-                                    T1_CTLSFLRLIM,
-                                    T1_CTLSCVMLIM,
-                                    T1_CTLSFLRLIM,
-                                    TAG_9F66,
-                                    true
-                            ),
-                            false,  false,
-                            false,  false,  new ArrayList<>(0)
-                    )
-            );
-        // } else {
+        if (SPE_APPTYPE.contains("CREDIT")) {
             candidateList.add(
                     new CombinationConfiguration(
                             "A0000004941010",
@@ -132,20 +161,50 @@ public class Kernel {
                             false,  false,  new ArrayList<>(0)
                     )
             );
-        // }
+        } else {
+            candidateList.add(
+                    new CombinationConfiguration(
+                            "A0000004942010",
+                            T1_CTLSMODE,
+                            new EntryPointConfigurationData(
+                                    true,
+                                    T1_CTLSZEROAM,
+                                    T1_CTLSZEROAM,
+                                    T1_CTLSTRNLIM,
+                                    T1_CTLSFLRLIM,
+                                    T1_CTLSCVMLIM,
+                                    T1_CTLSFLRLIM,
+                                    TAG_9F66,
+                                    true
+                            ),
+                            false,  false,
+                            false,  false,  new ArrayList<>(0)
+                    )
+            );
+        }
 
         List<TransactionTypeConfiguration> operationList = new ArrayList<>(0);
 
         operationList.add(new TransactionTypeConfiguration(SPE_TRNTYPE, candidateList));
 
-        return new MPosConfiguration(new ReaderConfiguration(terminal, T1_TRMID, operationList));
+        configuration = new MPosConfiguration(new ReaderConfiguration(terminal, T1_TRMID, operationList));
+
+        sConfiguration.set(configuration);
+
+        return configuration;
     }
 
     private static CustomInitializer _getCustomInitializer() {
-        Log.d(TAG, "_getCustomInitializer");
+        // Log.d(TAG, "_getCustomInitializer");
+
+        CustomInitializer initializer = sCustomInitializer.get();
+
+        if (initializer != null) {
+            return initializer;
+        }
 
         RandomNumberGenerator randomizer = () -> {
-            Log.d(TAG, "RandomNumberGenerator::nextRandomValue");
+            Log.d("RandomNumberGenerator", "nextRandomValue");
 
             byte[] seed = new byte[8];
 
@@ -158,25 +217,55 @@ public class Kernel {
             return seed;
         };
 
-        return new CustomInitializer(randomizer, null);
+        initializer = new CustomInitializer(randomizer, null);
+
+        sCustomInitializer.set(initializer);
+
+        return initializer;
     }
 
     private static TransactionData _getTransactionData(Amount SPE_AMOUNT, Currency SPE_TRNCURR, TransactionType SPE_TRNTYPE, Amount SPE_CASHBACK, Date SPE_TRNDATE) {
-        Log.d(TAG, "_getTransactionData");
+        // Log.d(TAG, "_getTransactionData");
 
-        return new TransactionData(SPE_AMOUNT, SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, ConnectorType.NFC, SPE_TRNDATE);
+        TransactionData transactionData = sTransactionData.get();
+
+        if (transactionData != null) {
+            return transactionData;
+        }
+
+        transactionData = new TransactionData(SPE_AMOUNT, SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, ConnectorType.NFC, SPE_TRNDATE);
+
+        sTransactionData.set(transactionData);
+
+        return transactionData;
     }
 
     private static CardReaderModule _getReaderModule(MPosConfiguration configuration) {
-        Log.d(TAG, "_getReaderModule");
+        // Log.d(TAG, "_getReaderModule");
 
-        return new CardReaderModule(configuration, Application.getInstance(), _getCustomInitializer());
+        CardReaderModule readerModule = sReaderModule.get();
+
+        if (readerModule != null) {
+            return readerModule;
+        }
+
+        readerModule = new CardReaderModule(configuration, Application.getInstance(), _getCustomInitializer());
+
+        sReaderModule.set(readerModule);
+
+        return readerModule;
     }
 
     private Kernel() {
         Log.d(TAG, "Kernel");
 
         /* Nothing to do */
+    }
+
+    public static void finish() {
+        Log.d(TAG, "finish");
+
+        _finish();
     }
 
     public static void interrupt() {
@@ -187,13 +276,16 @@ public class Kernel {
         if (current != null) {
             current.cancel();
         }
+
+        _finish();
     }
 
-    public static void run() {
-        Log.d(TAG, "run");
+    public static void create() {
+        Log.d(TAG, "create");
+
+        // sSemaphore.acquireUninterruptibly();
 
         TransactionType     SPE_TRNTYPE     = TransactionType.PURCHASE;
-        String              SPE_APPTYPE     = "CREDIT";
         Currency            SPE_TRNCURR     = Currency.getInstance("BRL");
         Amount              SPE_AMOUNT      = new Amount(new BigDecimal(100L / 100), SPE_TRNCURR);
         Amount              SPE_CASHBACK    = new Amount(new BigDecimal(  0L / 100), SPE_TRNCURR);
@@ -205,11 +297,9 @@ public class Kernel {
         logger.setErrorEnabled(true);
         logger.setInfoEnabled (true);
 
-        logger.show(new Message(MessageType.DEBUG, TAG, "run::logger [" + logger + "]", SPE_TRNDATE));
-
         DiscoverMPos.Companion.getDebugger().register(logger);
 
-        MPosConfiguration   configuration   = _getConfiguration  (SPE_TRNTYPE, SPE_APPTYPE, SPE_TRNCURR, SPE_AMOUNT);
+        MPosConfiguration   configuration   = _getConfiguration  (SPE_TRNTYPE, "CREDIT",    SPE_TRNCURR, SPE_AMOUNT);
         TransactionData     transaction     = _getTransactionData(SPE_AMOUNT,  SPE_TRNCURR, SPE_TRNTYPE, SPE_CASHBACK, SPE_TRNDATE);
         CardReaderModule    readerModule    = _getReaderModule   (configuration);
 
@@ -219,6 +309,8 @@ public class Kernel {
         mobilePOS.init (readerModule);
 
         DiscoverMPos.Companion.getDebugger().setEnabled(true);
+
+        sMobilePOS.set(mobilePOS);
 
         CardReader   cardReader = readerModule.getCardReader();
 
